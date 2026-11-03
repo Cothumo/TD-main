@@ -1,0 +1,18 @@
+ABLETON REACTIVE - TouchDesigner template (reacts to 2+ Ableton tracks)
+
+1. Unzip this folder anywhere. Keep the files together.
+2. Open TouchDesigner, drag build_ableton_reactive.py into the network,
+   right-click the new Text DAT > Run Script.
+3. The component "ableton_reactive" appears. Dive in (i) and view OUT.
+   It runs in "Test signal" mode first, so it moves without Ableton.
+4. The build saves ableton_reactive.tox in this folder. Drag that .tox
+   into any future project. No need to run the script again.
+5. To react to Ableton, open the component's parameters (p), page
+   "Ableton", and set Source to TDAbleton or Audio device.
+   README.md explains both setups step by step.
+
+Files
+  build_ableton_reactive.py  builds the component (run once)
+  analysis.py                level / bands / onset detection (needed by the build)
+  test_analysis.py           optional self-test: python test_analysis.py
+  README.md                  full guide, TDAbleton setup, free-licence limits

@@ -23,6 +23,30 @@ Only the head is used; the room, the neck and the hoodie are removed (`head_mask
 
 Every time-dependent term is periodic in the loop length, so the end runs straight into the start.
 
+## Evaporating version
+
+`artist_head_evaporate_loop.mp4` (made by `render_evaporate_loop.py`) is the same 7 s, 1080 × 1080 seamless loop,
+but the whole head is made of about 1.5M noise particles flowing to the right, so the portrait looks like it is
+evaporating.
+
+- Each particle is born inside the head and takes the photo's tone at that spot, so together the resting particles
+  draw the portrait as trembling, shimmering grain.
+- After a while each one lifts off. A current that speeds up carries it to the right, and curl-noise turbulence and
+  buoyancy tear the streams into grainy wisps that fade as they go.
+- Particles on the outline and at the back of the head leave sooner than the ones in the face. The hair and ear
+  dissolve the most, and the face stays readable.
+- At 1.55 s and 4.85 s a gust drives the streams and the Ambient Ink vibration (`ink_post.glsl`) shakes the whole
+  particle portrait.
+- Behind it are the Screen 2 backlit haze, the rolling tracking band, snow, dropouts, scanlines and the vignette.
+
+The look is set in the `PP` dict: Hold, Flight, Current, Rise, Turbulence, Coverage, Shimmer, Tremble, Dust and
+Vibration. `--density` sets how many particles there are (particles per head pixel per loop).
+
+```
+python ArtistPhoto/render_evaporate_loop.py                  # -> ArtistPhoto/artist_head_evaporate_loop.mp4 (~5 min, ~3 GB RAM)
+python ArtistPhoto/render_evaporate_loop.py --preview 30 52  # a few PNGs only
+```
+
 ## Re-render
 
 ```

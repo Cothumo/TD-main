@@ -2,16 +2,18 @@
 # right, so the portrait looks like it is evaporating. The Screen 2 backlit haze is behind it, and the Ambient Ink
 # vibration shakes the particles.
 #
-# Every particle is born inside the head (head_mask.png) and takes the photo's tone at that spot, so together the
-# resting particles draw the portrait. Each one holds still (trembling) for a while, then lifts off: a current that
-# speeds up carries it to the right, and curl-noise turbulence and buoyancy tear the streams into smoke. It fades as
-# it goes. Particles near the outline and at the back of the head leave sooner than the ones in the face, so the head
-# is thinner and more eroded on the right and the face stays readable. On the two unstable moments (BURSTS) a gust
-# drives the streams and the ink_post vibration (jitter, fast oscillation, row wobble, trailing second image) shakes
-# the whole particle layer.
+# --look silhouette (default): the head is a dark form against the light, like Screen 2's figure. Only its contours
+#   show: the outline catches the backlight as a grainy rim, and faint lines trace the features (hairline, eyes, brow,
+#   ear, beard edge) from the photo's edges. The face stays concealed.
+# --look photo: every particle takes the photo's tone, so the resting particles draw the portrait itself.
+# Each particle is born inside the head (head_mask.png) and holds still (trembling) for a while, then lifts off: a
+# current that speeds up carries it to the right, and curl-noise turbulence and buoyancy tear the streams into
+# smoke. It fades as it goes. Particles at the back of the head and on the outline leave sooner than the ones in the
+# face, so the head is more eroded on the right. On the two unstable moments (BURSTS) a gust drives the streams and
+# the ink_post vibration (jitter, fast oscillation, row wobble, trailing second image) shakes the whole particle layer.
 # Everything is periodic in the loop length, so the video loops seamlessly.
 #
-#   python render_evaporate_loop.py [--size 1080] [--seconds 7] [--fps 30] [--out artist_head_evaporate_loop.mp4]
+#   python render_evaporate_loop.py [--look silhouette|photo] [--size 1080] [--seconds 7] [--fps 30] [--out FILE]
 #                                   [--density 3.6] [--preview N ...] [--workers 4]
 import argparse, math, os, subprocess, sys, time
 import numpy as np
@@ -25,12 +27,17 @@ ap.add_argument('--size', type=int, default=1080)
 ap.add_argument('--seconds', type=float, default=7.0)
 ap.add_argument('--fps', type=int, default=30)
 ap.add_argument('--density', type=float, default=3.6, help='particles born per head pixel per loop')
-ap.add_argument('--out', default=os.path.join(HERE, 'artist_head_evaporate_loop.mp4'))
+ap.add_argument('--look', choices=['silhouette', 'photo'], default='silhouette',
+                help='silhouette = dark backlit head, only its rim and feature contours show; photo = the photo tones')
+ap.add_argument('--out', default=None)
 ap.add_argument('--frames-dir', default=None)
 ap.add_argument('--preview', type=int, nargs='*', default=None, help='only render these frame numbers to PNG')
 ap.add_argument('--workers', type=int, default=os.cpu_count() or 4)
 ap.add_argument('--seed', type=int, default=11)
 ARGS = ap.parse_args()
+SIL_LOOK = ARGS.look == 'silhouette'
+if ARGS.out is None:
+    ARGS.out = os.path.join(HERE, 'artist_head_silhouette_evaporate_loop.mp4' if SIL_LOOK else 'artist_head_evaporate_loop.mp4')
 
 S = ARGS.size
 FPS = ARGS.fps
@@ -41,18 +48,23 @@ TAU = 2 * math.pi
 rng0 = np.random.default_rng(ARGS.seed)
 
 # Screen 2 background (haze + light + analog TV) and the particle look
-P2 = dict(Haze=1.5, Light=1.25, Lightsize=0.32, Lightx=0.6, Lighty=0.34, Chaos=0.6, Ambient=0.4, Snow=0.5,
+P2 = dict(Haze=1.7, Light=1.45, Lightsize=0.42, Lightx=0.5, Lighty=0.4, Chaos=0.6, Ambient=0.4, Snow=0.5,
           Scanlines=0.4, pads=0.4)
 PP = dict(Hold=3.2,            # s: how long a face particle rests before it evaporates (the back of the head: less)
           Flight=2.6,          # s: mean flight time to fade out
           Current=230.0,       # px/s (at 720 high) the current reaches to the right
           Rise=45.0,           # px/s upward drift (buoyancy)
           Turbulence=1.0,      # curl-noise strength
-          Coverage=1.35,       # how opaque the resting particles are
+          Coverage=1.7,       # how opaque the resting particles are
           Shimmer=0.07,        # per-frame tone noise of each particle
           Tremble=0.55,        # px of per-frame jitter of the resting particles
+          Rim=1.0,             # the outline catches the backlight
+          Contours=0.65,       # faint feature lines inside the silhouette (eyes, brow, nose, beard edge)
           Dust=1.9,            # how dense / visible the evaporating particles are
           Vibration=1.5)       # ink_post Vibration
+if not SIL_LOOK:                 # the photo-tone version: the light sits further right, the particles are lighter
+    P2.update(Haze=1.5, Light=1.25, Lightsize=0.32, Lightx=0.6, Lighty=0.34)
+    PP.update(Coverage=1.35)
 BURSTS = (1.55, 4.85)
 
 
@@ -141,9 +153,33 @@ TN = TONE[np.clip(P0[:, 1].astype(int), 0, S - 1), np.clip(P0[:, 0].astype(int),
 dist = cv2.distanceTransform((HEAD > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
 dist[:, :3] = 999                                             # the frame's left edge is not an outline (photo cut)
 DE = dist[np.clip(P0[:, 1].astype(int), 0, S - 1), np.clip(P0[:, 0].astype(int), 0, S - 1)]
+# silhouette: the head is a dark form against the light; only its contours show - the outline catches the backlight
+# (strongest on the side facing the light) and faint lines trace the features (dark lines of the photo, in the skin)
+PH = cv2.warpAffine(photo, M, (S, S), flags=cv2.INTER_AREA)
+g0 = cv2.GaussianBlur(PH, (0, 0), 2.2 * K / 1.5)
+gx_ = cv2.Sobel(g0, cv2.CV_32F, 1, 0, ksize=3); gy_ = cv2.Sobel(g0, cv2.CV_32F, 0, 1, ksize=3)
+mag = np.sqrt(gx_ * gx_ + gy_ * gy_)
+can = cv2.Canny((g0 * 255).astype(np.uint8), 18, 42, L2gradient=True).astype(np.float32) / 255   # thin contour lines
+can = cv2.GaussianBlur(can, (0, 0), 0.6 * K) * 2.2
+g1 = cv2.GaussianBlur(PH, (0, 0), 1.4 * K / 1.5); g2 = cv2.GaussianBlur(PH, (0, 0), 4.0 * K / 1.5)
+dl = ss(0.035, 0.11, g2 - g1) * ss(0.22, 0.45, g2)                                                 # dark creases
+lines_ = np.clip(np.maximum(can * ss(0.05, 0.15, mag) * 0.9, dl * 0.8), 0, 1) * ss(7 * K, 16 * K, dist)
+lines_ *= 0.45 + 0.55 * ss(0.12, 0.3, g2)                                                          # quieter in the hair
+cc_n, cc_lab, cc_st, _ = cv2.connectedComponentsWithStats((lines_ > 0.25).astype(np.uint8), 8)
+cc_keep = np.zeros(cc_n, bool); cc_keep[1:] = cc_st[1:, cv2.CC_STAT_AREA] >= int(110 * K * K / 2.25)  # long contours only
+lines_ = lines_ * cc_keep[cc_lab]
+_X, _Y = np.meshgrid((np.arange(S) + 0.5) / S, (np.arange(S) + 0.5) / S)
+_r = np.sqrt((_X - P2['Lightx']) ** 2 + (_Y - P2['Lighty']) ** 2)
+facing = 0.3 + 0.7 * np.exp(-_r / (P2['Lightsize'] * 1.3))
+rim = np.exp(-np.maximum(dist - 0.5, 0) / (4.0 * K / 1.5)) * (dist < 900)
+rim *= 1 - 0.75 * ss(0.62 * S, 0.7 * S, _Y * S) * (1 - ss(0.3 * S, 0.4 * S, _X * S))  # not on the cut under the beard
+SIL = 0.03 + 0.025 * PH + PP['Rim'] * 1.15 * rim * (0.6 + 0.4 * facing) + PP['Contours'] * lines_
+if SIL_LOOK:
+    TN = np.clip(SIL[np.clip(P0[:, 1].astype(int), 0, S - 1), np.clip(P0[:, 0].astype(int), 0, S - 1)], 0, 1).astype(np.float32)
+del _X, _Y, _r
 xn = np.clip(P0[:, 0] / HEAD_W, 0, 1)
 hold = PP['Hold'] * (0.35 + 0.65 * (1 - xn) ** 1.1 + 0.25) * (0.55 + 0.9 * rng0.random(NP))
-hold *= 0.35 + 0.65 * ss(0.0, 34.0 * K, DE)
+hold *= (0.6 + 0.4 * ss(0.0, 34.0 * K, DE)) if SIL_LOOK else (0.35 + 0.65 * ss(0.0, 34.0 * K, DE))  # the rim holds longer
 flight = PP['Flight'] * (0.6 + 0.8 * rng0.random(NP))
 HOLD_F = np.maximum((hold * FPS).astype(np.int64), 1)
 FL_F = np.maximum((flight * FPS).astype(np.int64), 6)
@@ -268,8 +304,13 @@ def particles(f, light):
     u = s_ / FL_F[fi_]
     wf = (PP['Dust'] * (1 - u) ** 1.2 * np.minimum(s_ / 4.0, 1.0)).astype(np.float32)
     lx = np.clip(pf[:, 0].astype(int), 0, S - 1); ly = np.clip(pf[:, 1].astype(int), 0, S - 1)
-    e = np.minimum(u * 2.2, 1.0) * 0.85
-    tf = TN[fi_] * (1 - e) + (0.66 + 0.2 * light[ly, lx] - 0.4 * ss(0.5, 0.8, light[ly, lx])) * e + rng.normal(0, PP['Shimmer'], len(fi_)).astype(np.float32)
+    if SIL_LOOK:    # dark smoke against the light, a little lighter where it is dark; rim grains stay bright at first
+        e = np.minimum(u * 1.5, 1.0) * 0.6
+        target = 0.34 - 0.29 * ss(0.2, 0.5, light[ly, lx])
+    else:           # light dust, darker in the light's core
+        e = np.minimum(u * 2.2, 1.0) * 0.85
+        target = 0.66 + 0.2 * light[ly, lx] - 0.4 * ss(0.5, 0.8, light[ly, lx])
+    tf = TN[fi_] * (1 - e) + target * e + rng.normal(0, PP['Shimmer'], len(fi_)).astype(np.float32)
     rad = 0.55 + 1.1 * u * K / 1.5
     W = np.zeros((S, S), np.float64); TW = np.zeros((S, S), np.float64)
     splat(W, pr[:, 0], pr[:, 1], wr); splat(TW, pr[:, 0], pr[:, 1], wr * tr)

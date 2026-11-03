@@ -1,0 +1,220 @@
+# Scenes - layered screens, backlit haze and the live camera silhouette (NIN live performance elements).
+# Chain: ink_layer -> nin_stage -> scenes -> sphere -> viewer. The acts of nin_stage now have 5 acts:
+#   1 Static, 2 Melt, 3 Scrim, 4 Layered screens, 5 Backlit haze  (the silhouette is in every act).
+# Rebuild: exec(open(project.folder + '/Scenes/build_scenes.py').read())
+import math
+
+D = project.folder + '/Scenes'
+P1 = op('/project1')
+SRC = '/project1/nin_stage/OUT' if op('/project1/nin_stage') is not None else '/project1/ink_layer/OUT'
+log = []
+
+def sp(n, name, val=None, expr=None):
+    p = getattr(n.par, name, None)
+    if p is None:
+        log.append('%s.%s missing' % (n.name, name)); return
+    try:
+        if expr is not None:
+            p.expr = expr
+        else:
+            p.val = val
+    except Exception as e:
+        log.append('%s.%s: %s' % (n.name, name, e))
+
+old = op('/project1/scenes')
+if old is not None:
+    old.destroy()
+C = P1.create(baseCOMP, 'scenes'); C.nodeX, C.nodeY = 200, -900
+
+def mk(ty, name, x, y):
+    n = C.create(ty, name); n.nodeX, n.nodeY = x, y; return n
+
+def drop_docked(n):
+    try:
+        for dd in list(n.docked):
+            dd.destroy()
+    except Exception:
+        pass
+
+# ---------------- parameters
+pg = C.appendCustomPage('Scenes')
+def fl(page, nm, dv, lo, hi, hlp, label=None):
+    q = page.appendFloat(nm, label=label)[0] if label else page.appendFloat(nm)[0]
+    q.default = dv; q.val = dv; q.normMin = lo; q.normMax = hi; q.help = hlp
+    return q
+fl(pg, 'Screens', 0.0, 0, 1, 'Layered screens: the picture on three see-through screens at different depths (the acts set it: act 4)')
+fl(pg, 'Screendepth', 1.0, 0, 2, 'how far apart the screens are (the back ones smaller, softer, darker)')
+fl(pg, 'Screendrift', 1.0, 0, 3, 'how much each screen drifts on its own')
+fl(pg, 'Screenclear', 0.6, 0, 1.5, 'how much of each screen slowly clears (patches you look through to the screen behind)')
+fl(pg, 'Backlight', 0.0, 0, 1, 'Backlit haze: one soft light far behind drifting haze, the scene dark against it (the acts set it: act 5)')
+fl(pg, 'Hazedensity', 1.0, 0, 2.5, 'how thick the haze is (the pads, Stems, thicken it further)')
+fl(pg, 'Lightsize', 0.2, 0.03, 0.8, 'size of the light behind the haze (fraction of the frame width)')
+fl(pg, 'Lightx', 0.5, 0, 1, 'where the light is, left - right')
+fl(pg, 'Lighty', 0.64, 0, 1, 'where the light is, bottom - top')
+ps = C.appendCustomPage('Silhouette')
+fl(ps, 'Silhouette', 0.7, 0, 1, 'the live camera silhouette in the scene (0 = off)')
+q = ps.appendToggle('Cameraon', label='Camera On')[0]; q.default = True; q.val = True
+cam_probe = C.create(videodeviceinTOP, '_probe')
+labels = list(cam_probe.par.device.menuLabels)
+cam_probe.destroy()
+q = ps.appendStrMenu('Camera')[0]
+q.menuNames = labels or ['Integrated Camera']; q.menuLabels = labels or ['Integrated Camera']
+want = globals().get('SCENES_CAMERA', 'Integrated Camera')
+q.default = want if want in (labels or [want]) else (labels[0] if labels else want); q.val = q.default
+q = ps.appendMenu('Mode')[0]
+q.menuNames = ['difference', 'dark']
+q.menuLabels = ['Difference from the empty stage (press Capture with nobody in view)', 'Dark figure (performer lit from behind)']
+q.default = 'difference'; q.val = 'difference'
+ps.appendPulse('Capture', label='Capture Empty Stage')
+fl(ps, 'Learn', 40.0, 0, 300, 'seconds the empty stage takes to be learned slowly (0 = only on Capture)')
+fl(ps, 'Threshold', 0.14, 0.01, 0.8, 'how different from the background (or how dark) a pixel must be to count as the performer')
+fl(ps, 'Softness', 0.3, 0.005, 1.0, 'soft edge of the figure')
+fl(ps, 'Silscale', 1.0, 0.2, 3, 'size of the figure (1 = the camera fills the frame height)')
+fl(ps, 'Silx', 0.0, -1, 1, 'move the figure left / right')
+fl(ps, 'Sily', 0.0, -1, 1, 'move the figure down / up')
+q = ps.appendToggle('Mirror')[0]; q.default = True; q.val = True
+fl(ps, 'Silflow', 1.0, 0, 3, 'how much the picture flows round the body')
+fl(ps, 'Silhouettedark', 0.85, 0, 1, 'how dark the figure is')
+fl(ps, 'Siltrail', 0.7, 0, 1, 'faint echoes trailing its movement')
+fl(ps, 'Trailtime', 1.5, 0.1, 8, 'seconds the echoes take to fade')
+
+def shader(name, fname, x, y):
+    px = mk(textDAT, name + '_pixel', x, y - 150); px.text = open(D + '/' + fname).read()
+    g = mk(glslTOP, name, x, y)
+    sp(g, 'pixeldat', px.name)
+    for dd in list(g.docked):
+        if dd.name != px.name:
+            try: dd.destroy()
+            except Exception: pass
+    return g
+
+def uniforms(g, U):
+    g.seq.vec.numBlocks = len(U)
+    for i, (nm, ex_) in enumerate(U):
+        getattr(g.par, 'vec%dname' % i).val = nm
+        for ch, e in zip('xyzw', ex_):
+            getattr(g.par, 'vec%dvalue%s' % (i, ch)).expr = e
+
+# ---------------- the live silhouette
+cam = mk(videodeviceinTOP, 'cam', -1200, -500)
+sp(cam, 'active', expr="parent().par.Cameraon and parent().par.Silhouette > 0")
+for n_, l_ in zip(cam.par.device.menuNames, cam.par.device.menuLabels):
+    if l_ == C.par.Camera.eval():
+        cam.par.device = n_
+pe = mk(parameterexecuteDAT, 'camera_pexec', -1200, -350)
+pe.text = ("def onValueChange(par, prev):\n"
+           "\tif par.name == 'Camera':\n"
+           "\t\tc = par.owner.op('cam')\n"
+           "\t\tfor n_, l_ in zip(c.par.device.menuNames, c.par.device.menuLabels):\n"
+           "\t\t\tif l_ == par.eval():\n\t\t\t\tc.par.device = n_\n"
+           "\treturn\n"
+           "def onPulse(par):\n"
+           "\tif par.name == 'Capture':\n\t\tpar.owner.store('cap', 3)\n"
+           "\treturn\n")
+sp(pe, 'op', '..'); sp(pe, 'pars', 'Camera Capture'); sp(pe, 'valuechange', True); sp(pe, 'onpulse', True)
+lo = mk(resolutionTOP, 'cam_small', -1000, -500); lo.inputConnectors[0].connect(cam)
+sp(lo, 'outputresolution', 'quarter')
+bgfb = mk(feedbackTOP, 'bg_fb', -800, -650); bgfb.inputConnectors[0].connect(lo)
+bg = shader('bg', 'sil_bg.glsl', -800, -500)
+sp(bg, 'format', 'rgba16float')
+sp(bgfb, 'top', 'bg')
+uniforms(bg, [('uR', ["1.0 if parent().fetch('cap', 0, search=False) > 0 else (0.0 if parent().par.Learn <= 0 else 1.0 / (60.0 * parent().par.Learn))", '0', '0', '0'])])
+C.store('cap', 30)          # learn the stage straight away at the start
+dif = shader('diff', 'sil_diff.glsl', -600, -500)
+uniforms(dif, [('uM', ["1.0 if parent().par.Mode == 'dark' else 0.0", '0', '0', '0'])])
+bl = mk(blurTOP, 'diff_blur', -400, -500); bl.inputConnectors[0].connect(dif)
+sp(bl, 'size', 12)
+trfb = mk(feedbackTOP, 'trail_fb', -200, -650); trfb.inputConnectors[0].connect(bl)
+tr = shader('trail', 'sil_trail.glsl', -200, -500)
+sp(tr, 'format', 'rgba16float')
+sp(trfb, 'top', 'trail')
+uniforms(tr, [('uT', ['parent().par.Threshold', 'parent().par.Softness',
+                      'math.exp(-1.0 / (60.0 * max(parent().par.Trailtime, 0.05)))',
+                      "1.0 if (parent().par.Cameraon and parent().par.Silhouette > 0) else 0.0"])])
+silo = mk(nullTOP, 'sil', 0, -500); silo.inputConnectors[0].connect(tr)
+cx = mk(executeDAT, 'cap_exec', -1000, -350)
+cx.text = "def onFrameEnd(frame):\n\tc = me.parent()\n\tn = c.fetch('cap', 0, search=False)\n\tif n > 0:\n\t\tc.store('cap', n - 1)\n\treturn\n"
+sp(cx, 'frameend', True); sp(cx, 'active', True)
+
+# ---------------- the scenes shader
+src = mk(selectTOP, 'src', -400, 0); sp(src, 'top', SRC)
+g = shader('scenes', 'scenes.glsl', 0, 0)
+sp(g, 'outputresolution', 'useinput')
+STEM = "(op('/project1/stems/out')['pads'].eval() if op('/project1/stems/out') is not None and op('/project1/stems/out')['pads'] is not None else 0.0)"
+LVL = "(op('/project1/nin_stage/echo')['slevel'].eval() if op('/project1/nin_stage/echo') is not None and op('/project1/nin_stage/echo')['slevel'] is not None else 0.0)"
+P = 'parent().par.'
+uniforms(g, [('uA', ['absTime.seconds % 10000', P + 'Screens', P + 'Backlight', "parent().par.Silhouette if parent().par.Cameraon else 0.0"]),
+             ('uB', [STEM, LVL, P + 'Hazedensity', P + 'Lightsize']),
+             ('uC', [P + 'Lightx', P + 'Lighty', P + 'Silhouettedark', P + 'Siltrail']),
+             ('uD', [P + 'Silscale', P + 'Silx', P + 'Sily', "1.0 if parent().par.Mirror else 0.0"]),
+             ('uE', [P + 'Screendepth', P + 'Screendrift', P + 'Screenclear', P + 'Silflow'])])
+o = mk(nullTOP, 'OUT', 200, 0); o.inputConnectors[0].connect(g); o.viewer = True
+oo = mk(outTOP, 'out1', 400, 0); oo.inputConnectors[0].connect(o)
+sp(C, 'opviewer', 'OUT')
+# GLSL TOP input connectors appear one per frame: connect them over the next frames
+run("o = op(args[0]); o.inputConnectors[0].connect(op(args[1]))", bg.path, lo.path, delayFrames=1)
+run("o = op(args[0]); o.inputConnectors[1].connect(op(args[1]))", bg.path, bgfb.path, delayFrames=3)
+run("o = op(args[0]); o.inputConnectors[0].connect(op(args[1]))", dif.path, lo.path, delayFrames=1)
+run("o = op(args[0]); o.inputConnectors[1].connect(op(args[1]))", dif.path, bg.path, delayFrames=3)
+run("o = op(args[0]); o.inputConnectors[0].connect(op(args[1]))", tr.path, bl.path, delayFrames=1)
+run("o = op(args[0]); o.inputConnectors[1].connect(op(args[1]))", tr.path, trfb.path, delayFrames=3)
+run("o = op(args[0]); o.inputConnectors[0].connect(op(args[1]))", g.path, src.path, delayFrames=1)
+run("o = op(args[0]); o.inputConnectors[1].connect(op(args[1]))", g.path, silo.path, delayFrames=3)
+
+# ---------------- into the chain: the sphere now reads the scenes
+s = op('/project1/sphere/src')
+if s is not None:
+    sp(s, 'top', C.path + '/OUT')
+else:
+    v = op('/project1/viewer')
+    if v is not None:
+        sp(v, 'winop', C.path + '/OUT')
+
+# ---------------- 5 acts in nin_stage (4 Layered screens, 5 Backlit haze)
+ACTS_TEXT = '''ACTS = {
+    '1': {'Static': 0.85, 'Melt': 0.0, 'Warp': 0.15, 'Scrim': 0.25, 'Ghost': 0.15, 'Echo': 0.45, 'Ripple': 0.3,
+          'Parallax': 0.5, 'Haze': 0.3, 'Darkness': 0.55, 'ink:Layeramount': 0.4, 'scenes:Screens': 0.0, 'scenes:Backlight': 0.0},
+    '2': {'Static': 0.1, 'Melt': 0.85, 'Warp': 0.8, 'Scrim': 0.3, 'Ghost': 0.2, 'Echo': 0.6, 'Ripple': 0.4,
+          'Parallax': 0.7, 'Haze': 0.4, 'Darkness': 0.6, 'ink:Layeramount': 0.45, 'scenes:Screens': 0.0, 'scenes:Backlight': 0.0},
+    '3': {'Static': 0.0, 'Melt': 0.0, 'Warp': 0.6, 'Scrim': 1.0, 'Ghost': 0.9, 'Echo': 0.6, 'Ripple': 1.0,
+          'Parallax': 1.4, 'Haze': 0.6, 'Darkness': 0.4, 'ink:Layeramount': 0.55, 'scenes:Screens': 0.0, 'scenes:Backlight': 0.0},
+    '4': {'Static': 0.0, 'Melt': 0.2, 'Warp': 0.2, 'Scrim': 0.2, 'Ghost': 0.2, 'Echo': 0.5, 'Ripple': 0.3,
+          'Parallax': 0.6, 'Haze': 0.35, 'Darkness': 0.55, 'ink:Layeramount': 0.4, 'scenes:Screens': 1.0, 'scenes:Backlight': 0.0},
+    '5': {'Static': 0.0, 'Melt': 0.3, 'Warp': 0.3, 'Scrim': 0.15, 'Ghost': 0.2, 'Echo': 0.4, 'Ripple': 0.3,
+          'Parallax': 0.5, 'Haze': 0.5, 'Darkness': 0.35, 'ink:Layeramount': 0.5, 'scenes:Screens': 0.0, 'scenes:Backlight': 1.0},
+}'''
+ACT_LABELS = ['1 Static (analog signal breaking up)', '2 Melt (feedback trails, noise warp)', '3 Scrim (layered projection, heat haze)',
+              '4 Layered screens (see-through screens at different depths)', '5 Backlit haze (one light behind the haze)']
+
+def patch_acts_text(t):
+    i = t.index('ACTS = {'); j = t.index('\n}', i) + 2
+    t = t[:i] + ACTS_TEXT + t[j:]
+    t = t.replace('% 3 + 1', '% len(ACTS) + 1')
+    if "name.startswith('scenes:')" not in t:
+        t = t.replace("        else:\n            par = getattr(C.par, name, None)",
+                      "        elif name.startswith('scenes:'):\n            o = op('/project1/scenes'); par = getattr(o.par, name[7:], None) if o is not None else None\n"
+                      "        else:\n            par = getattr(C.par, name, None)")
+    return t.replace('# the three acts:', '# the five acts:')
+
+N = op('/project1/nin_stage')
+if N is not None:
+    a = N.op('acts')
+    a.text = patch_acts_text(a.text)
+    N.par.Act.menuNames = ['1', '2', '3', '4', '5']; N.par.Act.menuLabels = ACT_LABELS
+    pa = N.par.Act1.page
+    for k in (4, 5):
+        if not hasattr(N.par, 'Act%d' % k):
+            pa.appendPulse('Act%d' % k, label='Go to Act %d' % k)
+    try:
+        N.par.Actsource.menuLabels = ['Auto (1 > 2 > 3 > 4 > 5 > 1 ... every Act Duration, on a hit)', 'Manual (the Act menu / buttons)',
+                                      'Ableton scene launches (scene 1 = act 1, 6 = act 1 again)']
+    except Exception as e:
+        log.append('labels: %s' % e)
+    for d in N.children:
+        if d.OPType == 'parameterexecuteDAT' and 'Act1' in d.par.pars.eval():
+            d.par.pars = 'Act1 Act2 Act3 Act4 Act5'
+    N.save(project.folder + '/nin_stage.tox')
+else:
+    log.append('no nin_stage: acts not extended')
+run("op(args[0]).save(args[1])", C.path, D + '/scenes.tox', delayFrames=8)   # after the inputs are connected
+print('SCENES built: %s (from %s) -> %s | log %s' % (C.path, SRC, 'sphere' if s is not None else 'viewer', log or 'none'))

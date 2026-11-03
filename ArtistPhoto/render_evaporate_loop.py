@@ -343,6 +343,6 @@ if __name__ == '__main__':
     if ARGS.preview:
         print('preview frames in', FR); sys.exit(0)
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', str(FPS), '-i', os.path.join(FR, 'f%04d.png'),
-                    '-c:v', 'libx264', '-preset', 'slow', '-crf', '15', '-pix_fmt', 'yuv420p', '-tune', 'grain',
+                    '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-tune', 'grain',
                     '-movflags', '+faststart', ARGS.out], check=True)
     print('video:', ARGS.out, '%.1f s' % (N / FPS), '%.0fs total' % (time.time() - t0))

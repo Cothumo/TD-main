@@ -29,6 +29,9 @@ Every time-dependent term is periodic in the loop length, so the end runs straig
 
 - A particle stream constantly flows across the whole frame from the left side to the right side, with curl-noise
   swirls.
+- Most of the time there is only the flow. The face appears only now and then (`APPEAR`): at 0.9 s and 4.2 s it
+  surfaces out of the stream in patches, holds for a moment and sinks back (the vibration bursts land on those
+  peaks), and at 6.0 s there is a faint partial glimpse. The stream gathers in the head only while it is there.
 - The head is hidden inside it, drawn the way Screen 2 draws its figure: a dark form in the light, with a soft outline
   catching the light. There are no traced features, only a faint soft relief inside. The outline wobbles and breathes
   as the haze flows round it, breaks into bright segments that travel along it, tears sideways now and then, and
@@ -41,7 +44,7 @@ Every time-dependent term is periodic in the loop length, so the end runs straig
   the light.
 
 The look is set in the `LOOK` dict at the top of the script. Streamglow, Figure, Rim, Flow, Tear, Echoes, Detail and
-Headdensity set how the head shows. Gain, Bloom, Scanlines, Scanband, Flicker, Slices, Chroma and Tint set the hologram.
+Headdensity set how the head shows, and `APPEAR` (start time, strength) sets when it surfaces. Gain, Bloom, Scanlines, Scanband, Flicker, Slices, Chroma and Tint set the hologram.
 
 ```
 python ArtistPhoto/render_hologram_loop.py                  # -> ArtistPhoto/artist_head_hologram_loop.mp4 (~5 min, ~3 GB RAM)

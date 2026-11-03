@@ -1,5 +1,6 @@
 # Artist photo loop, hologram version: the head is hidden inside a particle stream that constantly flows across the
-# whole frame from the left side to the right side. It only shows where the stream passes through it.
+# whole frame from the left side to the right side. Most of the time there is only the flow: the face surfaces in it
+# only now and then (APPEAR), in patches, holds for a moment and sinks back - shown where the stream passes through it.
 #
 # - The stream: particles enter on the left and leave on the right, carried by a current with curl-noise swirls
 #   (periodic in the loop). In the head's volume they slow down and light up, like Screen 2's figure: a soft outline
@@ -70,6 +71,9 @@ LOOK = dict(
     Backlight=0.32,       # the dim Screen 2 haze / far light behind
 )
 BURSTS = (1.55, 4.85)
+# the face only appears now and then: (start s, strength). It surfaces out of the flow (0.45 s), holds (0.5 s) and
+# sinks back (0.9 s); the bursts land on the first two peaks, the last one is a faint partial glimpse
+APPEAR = ((0.9, 1.0), (4.2, 1.0), (6.0, 0.4))
 
 
 def ss(e0, e1, x):
@@ -152,6 +156,25 @@ for ci, (sig, amp) in enumerate(((14.0, 45.0), (5.0, 40.0), (2.0, 22.0))):
     vs *= amp * K * LOOK['Turbulence'] / (np.sqrt((vs ** 2).sum(-1)).mean() + 1e-6)
     VEL += vs
 GUST = np.array([burst_env(f / FPS, tau=0.7) for f in range(N)], np.float32)
+
+
+def presence(t):
+    e = 0.0
+    for t0, amp in APPEAR:
+        d = (t - t0) % T
+        if d < 0.45:
+            v = ss(0.0, 0.45, d)
+        elif d < 0.95:
+            v = 1.0
+        elif d < 1.85:
+            v = 1.0 - ss(0.95, 1.85, d)
+        else:
+            v = 0.0
+        e = max(e, amp * float(v))
+    return e
+
+
+PRES = np.array([presence(f / FPS) for f in range(N)], np.float32)
 VELF = VEL.reshape(-1, 2)
 
 
@@ -189,7 +212,7 @@ for a in range(FMAXS):
     fi = (SF0 + a) % N
     sl = sample_map(SLOWG, HG, np.stack([p[:, 0], p[:, 1] - DY[fi]], -1))
     v = sample_vel(fi, p) * tg
-    vx = SPD * sp * (1 - LOOK['Headslow'] * sl) * (1 + 1.3 * GUST[fi])
+    vx = SPD * sp * (1 - LOOK['Headslow'] * PRES[fi] * sl) * (1 + 1.3 * GUST[fi])   # gathers only while the face is there
     p = p + (v + np.stack([vx, np.zeros_like(vx)], -1)).astype(np.float32) * dt
     if a % 30 == 0:
         print('  stream step %d/%d' % (a, FMAXS)); sys.stdout.flush()
@@ -307,8 +330,11 @@ def glow_map(f):
         rim = np.maximum(rim, np.clip(4 * me * (1 - me), 0, 1) * w * LOOK['Echoes'] * (0.4 + 0.6 * seg))
     rim *= rem(CUTH, sx, sy)
     vol = rem(VOLH, sx, sy)
-    g = (LOOK['Streamglow'] * (1 - LOOK['Figure'] * vol) + LOOK['Headglow'] * vol + LOOK['Rim'] * rim
-         + LOOK['Detail'] * rem(RELH, sx, sy))
+    # the face surfaces in patches: a drifting noise decides which parts show first
+    nr = fbm(u * 2.6 + 0.3 * math.cos(th + 0.7) + 11.0, v * 2.6 + 0.3 * math.sin(th + 0.7))
+    rv = np.clip((PRES[f] * 1.4 - nr) / 0.22, 0, 1).astype(np.float32)
+    g = (LOOK['Streamglow'] * (1 - LOOK['Figure'] * vol * rv) + (LOOK['Headglow'] * vol + LOOK['Rim'] * rim
+         + LOOK['Detail'] * rem(RELH, sx, sy)) * rv)
     return cv2.resize(g, (S, S), interpolation=cv2.INTER_LINEAR)
 
 
@@ -339,14 +365,15 @@ def light_frame(f):
     ri = al[rest]
     pr = P0[ri].copy(); pr[:, 1] += DY[f]
     pr += rng.normal(0, 0.5 * K / 1.5, pr.shape).astype(np.float32)
-    wr = 0.6 * glow_at(pr, Gf) * np.minimum(a[rest] / 6.0, 1.0) * (0.3 + 1.2 * rng.random(len(ri)) ** 2)
+    wr = 0.6 * PRES[f] * glow_at(pr, Gf) * np.minimum(a[rest] / 6.0, 1.0) * (0.3 + 1.2 * rng.random(len(ri)) ** 2)
     splat(E, pr[:, 0], pr[:, 1], wr.astype(np.float64))
     fl = al[~rest]
     s_ = a[~rest] - HOLD_F[fl]
     q1 = HFL[s_, fl].astype(np.float32)
     q0 = HFL[np.maximum(s_ - 1, 0), fl].astype(np.float32)
     u = s_ / FL_F[fl]
-    wf = glow_at(q1, Gf) * (1 - u) ** 0.8 * (0.7 + 0.6 * rng.random(len(fl)))
+    # only what lifted off a visible face carries its light into the flow
+    wf = PRES[(HF0[fl] + HOLD_F[fl]) % N] * glow_at(q1, Gf) * (1 - u) ** 0.8 * (0.7 + 0.6 * rng.random(len(fl)))
     streak(E, q0, q1, wf.astype(np.float64))
     return E.astype(np.float32)
 

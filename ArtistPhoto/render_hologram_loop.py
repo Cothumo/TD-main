@@ -50,9 +50,9 @@ LOOK = dict(
     Headslow=0.6,         # how much the flow slows down inside the head (it gathers there -> the head shows)
     Turbulence=1.0,       # curl-noise swirls of the flow
     Streamglow=1.2,       # brightness of the stream outside the head
-    Figure=0.93,          # the head is a dark form in the stream (Screen 2 figure): how much darker its volume is
+    Figure=0.68,          # the head is a dark form in the stream (Screen 2 figure): how much darker its volume is
     Headglow=0.07,        # faint light left inside the head volume
-    Rim=1.9,              # the outline catches the light (Screen 2 rim)
+    Rim=1.5,              # the outline catches the light (Screen 2 rim)
     Flow=0.85,            # the haze flows round the head: the outline wobbles and breathes
     Tear=1.0,             # rows of the outline tear sideways now and then
     Echoes=1.0,           # faint older outlines trailing behind it (right / up)
@@ -71,9 +71,10 @@ LOOK = dict(
     Backlight=0.32,       # the dim Screen 2 haze / far light behind
 )
 BURSTS = (1.55, 4.85)
-# the face only appears now and then: (start s, strength). It surfaces out of the flow (0.45 s), holds (0.5 s) and
-# sinks back (0.9 s); the bursts land on the first two peaks, the last one is a faint partial glimpse
-APPEAR = ((0.9, 1.0), (4.2, 1.0), (6.0, 0.4))
+# the face only appears now and then: (start s, strength). It surfaces slowly out of the flow (RISE s, eased in),
+# lingers (HOLD s) and sinks back (FALL s); the bursts land on the peaks. Strengths below 1 keep it subtle.
+APPEAR = ((0.15, 0.78), (3.45, 0.55))
+RISE, HOLD, FALL = 1.4, 0.3, 1.8
 
 
 def ss(e0, e1, x):
@@ -162,12 +163,12 @@ def presence(t):
     e = 0.0
     for t0, amp in APPEAR:
         d = (t - t0) % T
-        if d < 0.45:
-            v = ss(0.0, 0.45, d)
-        elif d < 0.95:
+        if d < RISE:
+            v = ss(0.0, RISE, d) ** 1.7                 # eased in: it begins almost imperceptibly
+        elif d < RISE + HOLD:
             v = 1.0
-        elif d < 1.85:
-            v = 1.0 - ss(0.95, 1.85, d)
+        elif d < RISE + HOLD + FALL:
+            v = (1.0 - ss(RISE + HOLD, RISE + HOLD + FALL, d)) ** 1.3
         else:
             v = 0.0
         e = max(e, amp * float(v))
@@ -332,7 +333,7 @@ def glow_map(f):
     vol = rem(VOLH, sx, sy)
     # the face surfaces in patches: a drifting noise decides which parts show first
     nr = fbm(u * 2.6 + 0.3 * math.cos(th + 0.7) + 11.0, v * 2.6 + 0.3 * math.sin(th + 0.7))
-    rv = np.clip((PRES[f] * 1.4 - nr) / 0.22, 0, 1).astype(np.float32)
+    rv = (np.clip((PRES[f] * 1.5 - nr + 0.1) / 0.5, 0, 1) * ss(0.0, 0.6, PRES[f])).astype(np.float32)   # soft patches
     g = (LOOK['Streamglow'] * (1 - LOOK['Figure'] * vol * rv) + (LOOK['Headglow'] * vol + LOOK['Rim'] * rim
          + LOOK['Detail'] * rem(RELH, sx, sy)) * rv)
     return cv2.resize(g, (S, S), interpolation=cv2.INTER_LINEAR)

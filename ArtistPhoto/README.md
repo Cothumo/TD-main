@@ -29,17 +29,19 @@ Every time-dependent term is periodic in the loop length, so the end runs straig
 
 - A particle stream constantly flows across the whole frame from the left side to the right side, with curl-noise
   swirls.
-- The head is hidden inside it. It shows only where the stream passes through the head's volume: the particles slow
-  down there and light up on the rim and on faint feature contours (hairline, eyes, brow, ear, beard edge). So the
-  head is drawn by moving, dotted light, and a thin layer of its own particles keeps evaporating into the flow.
+- The head is hidden inside it, drawn the way Screen 2 draws its figure: a dark form in the light, with a soft outline
+  catching the light. There are no traced features, only a faint soft relief inside. The outline wobbles and breathes
+  as the haze flows round it, breaks into bright segments that travel along it, tears sideways now and then, and
+  leaves two faint older outlines trailing behind. The stream particles draw all of it, and a thin layer of the head's
+  own particles keeps evaporating into the flow.
 - Hologram look: additive glowing particles with bloom on dark, projection scanlines, a bright scan band rolling up
   twice per loop, flicker, slices glitching sideways, an RGB fringe and a faint cool tint (`Tint = (1, 1, 1)` for
   grey).
 - At 1.55 s and 4.85 s a gust drives the flow, the slices and RGB split peak, and the Ambient Ink vibration shakes
   the light.
 
-The look is set in the `LOOK` dict at the top of the script. Stream, Headslow, Rim, Contours and Headdensity set how
-much of the head shows. Gain, Bloom, Scanlines, Scanband, Flicker, Slices, Chroma and Tint set the hologram.
+The look is set in the `LOOK` dict at the top of the script. Streamglow, Figure, Rim, Flow, Tear, Echoes, Detail and
+Headdensity set how the head shows. Gain, Bloom, Scanlines, Scanband, Flicker, Slices, Chroma and Tint set the hologram.
 
 ```
 python ArtistPhoto/render_hologram_loop.py                  # -> ArtistPhoto/artist_head_hologram_loop.mp4 (~5 min, ~3 GB RAM)

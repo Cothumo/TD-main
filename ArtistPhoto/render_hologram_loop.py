@@ -2,11 +2,12 @@
 # whole frame from the left side to the right side. It only shows where the stream passes through it.
 #
 # - The stream: particles enter on the left and leave on the right, carried by a current with curl-noise swirls
-#   (periodic in the loop). In the head's volume they slow down and light up, brightest on its rim and on faint
-#   feature contours (hairline, eyes, brow, ear, beard edge, taken from the photo's edges). So the head is a denser,
-#   glowing zone of the same flow, a projection made of moving light rather than a solid shape.
-# - The head's own particles: a thinner layer rests on the rim and contours (trembling), then evaporates into the
-#   stream. The back of the head goes first.
+#   (periodic in the loop). In the head's volume they slow down and light up, like Screen 2's figure: a soft outline
+#   catching the light that wobbles as the haze flows round it, breaks into travelling bright segments, tears
+#   sideways now and then and leaves faint older outlines trailing behind; inside only a faint soft relief. So the
+#   head is a denser, glowing zone of the same flow, made of moving light rather than a solid shape.
+# - The head's own particles: a thin layer rests near the outline (trembling), then evaporates into the stream.
+#   The back of the head goes first.
 # - Hologram: additive glowing particles with bloom over a dark background, fine projection scanlines, a bright scan
 #   band rolling up through it twice per loop, flicker, horizontal slices that glitch sideways, and an RGB fringe
 #   (chromatic split). The tint is a faint cool white (set Tint to (1, 1, 1) for pure grey).
@@ -47,10 +48,14 @@ LOOK = dict(
     Streamspeed=165.0,    # px/s (at 720) of the flow, left -> right
     Headslow=0.6,         # how much the flow slows down inside the head (it gathers there -> the head shows)
     Turbulence=1.0,       # curl-noise swirls of the flow
-    Ambientglow=0.06,     # brightness of the stream outside the head
-    Headglow=0.10,        # extra brightness inside the head volume
-    Rim=1.25,             # the outline lights up
-    Contours=1.0,         # feature contours light up
+    Streamglow=1.2,       # brightness of the stream outside the head
+    Figure=0.93,          # the head is a dark form in the stream (Screen 2 figure): how much darker its volume is
+    Headglow=0.07,        # faint light left inside the head volume
+    Rim=1.9,              # the outline catches the light (Screen 2 rim)
+    Flow=0.85,            # the haze flows round the head: the outline wobbles and breathes
+    Tear=1.0,             # rows of the outline tear sideways now and then
+    Echoes=1.0,           # faint older outlines trailing behind it (right / up)
+    Detail=0.22,          # faint relief inside the head (the photo's highlights catching a little light)
     Headdensity=0.35,     # the head's own particles (per head pixel per loop)
     Hold=2.6, Flight=2.4, # s: how long a head particle rests on the contours, then flies with the stream
     Gain=1.25,            # exposure of the light
@@ -106,29 +111,23 @@ PH = cv2.warpAffine(photo, M, (S, S), flags=cv2.INTER_AREA)
 HEAD_W = float(np.nonzero(HEAD.max(0) > 0.5)[0].max())
 dist = cv2.distanceTransform((HEAD > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
 dist[:, :3] = 999                                    # the frame's left edge is not an outline (the photo is cut there)
-g0 = cv2.GaussianBlur(PH, (0, 0), 2.2 * K / 1.5)
-gx_ = cv2.Sobel(g0, cv2.CV_32F, 1, 0, ksize=3); gy_ = cv2.Sobel(g0, cv2.CV_32F, 0, 1, ksize=3)
-mag = np.sqrt(gx_ * gx_ + gy_ * gy_)
-can = cv2.Canny((g0 * 255).astype(np.uint8), 18, 42, L2gradient=True).astype(np.float32) / 255
-can = cv2.GaussianBlur(can, (0, 0), 0.6 * K) * 2.2
-g1 = cv2.GaussianBlur(PH, (0, 0), 1.4 * K / 1.5); g2 = cv2.GaussianBlur(PH, (0, 0), 4.0 * K / 1.5)
-dl = ss(0.035, 0.11, g2 - g1) * ss(0.22, 0.45, g2)
-lines_ = np.clip(np.maximum(can * ss(0.05, 0.15, mag) * 0.9, dl * 0.8), 0, 1) * ss(7 * K, 16 * K, dist)
-lines_ *= 0.45 + 0.55 * ss(0.12, 0.3, g2)
-cc_n, cc_lab, cc_st, _ = cv2.connectedComponentsWithStats((lines_ > 0.25).astype(np.uint8), 8)
-cc_keep = np.zeros(cc_n, bool); cc_keep[1:] = cc_st[1:, cv2.CC_STAT_AREA] >= int(110 * K * K / 2.25)
-LINES = lines_ * cc_keep[cc_lab]
 _X, _Y = np.meshgrid((np.arange(S) + 0.5) / S, (np.arange(S) + 0.5) / S)
-RIM = np.exp(-np.maximum(dist - 0.5, 0) / (4.0 * K / 1.5)) * (dist < 900)
-RIM *= 1 - 0.75 * ss(0.62 * S, 0.7 * S, _Y * S) * (1 - ss(0.3 * S, 0.4 * S, _X * S))   # not on the cut under the beard
+RIM = np.exp(-np.maximum(dist - 0.5, 0) / (8.0 * K / 1.5)) * (dist < 900)   # (only where the head's own particles sit)
+CUT = 1 - 0.8 * ss(0.62 * S, 0.7 * S, _Y * S) * (1 - ss(0.3 * S, 0.4 * S, _X * S))   # no rim on the cut under the beard
 VOL = cv2.GaussianBlur(HEAD, (0, 0), 3 * K)
-# how bright a particle is at each place of the frame (the head at rest; the bob is added per frame)
-GLOW = LOOK['Ambientglow'] + LOOK['Headglow'] * VOL + LOOK['Rim'] * 0.95 * RIM + LOOK['Contours'] * LINES
-GLOW = GLOW.astype(np.float32)
+# Screen 2 'Detail': faint relief inside the figure, soft - no traced features
+rl = np.maximum(cv2.GaussianBlur(PH, (0, 0), 2.5 * K) - cv2.GaussianBlur(PH, (0, 0), 9 * K), 0) * ss(10 * K, 25 * K, dist)
+REL = (rl / (np.percentile(rl[HEAD > 0.5], 99) + 1e-6)).clip(0, 1)
+# half-resolution copies for the per-frame glow map
+HS2 = S // 2
+half = lambda im: cv2.resize(im.astype(np.float32), (HS2, HS2), interpolation=cv2.INTER_AREA)
+HEADH = cv2.GaussianBlur(half(HEAD), (0, 0), 2.5 * K / 2)
+VOLH, RELH, CUTH = half(VOL), half(REL), half(CUT)
+HGRID = np.meshgrid(np.arange(HS2, dtype=np.float32), np.arange(HS2, dtype=np.float32))
 SLOW = cv2.GaussianBlur(HEAD, (0, 0), 10 * K).astype(np.float32)
 HG = 270                                              # sampling grid for the slow-down map
 SLOWG = cv2.resize(SLOW, (HG, HG), interpolation=cv2.INTER_AREA)
-del _X, _Y
+del _X, _Y, rl
 
 # ---------------------------------------------------------------- flow: periodic curl noise + the current
 G = 136
@@ -201,12 +200,11 @@ del p
 # ---------------------------------------------------------------- the head's own particles: rest on it, then fly
 inside = HEAD > 0.04
 py_, px_ = np.nonzero(inside)
-wgt = HEAD[py_, px_].astype(np.float64) * (0.35 + 2.5 * np.clip(RIM[py_, px_] + LINES[py_, px_], 0, 1))
+wgt = HEAD[py_, px_].astype(np.float64) * (0.35 + 2.5 * RIM[py_, px_])
 NH = int(LOOK['Headdensity'] * float(HEAD.sum()))
 pick = rng0.choice(len(py_), NH, p=wgt / wgt.sum())
 P0 = np.stack([px_[pick], py_[pick]], -1).astype(np.float32) + rng0.random((NH, 2)).astype(np.float32)
 iy0 = np.clip(P0[:, 1].astype(int), 0, S - 1); ix0 = np.clip(P0[:, 0].astype(int), 0, S - 1)
-HB = GLOW[iy0, ix0]
 xn = np.clip(P0[:, 0] / HEAD_W, 0, 1)
 hold = LOOK['Hold'] * (0.3 + 0.7 * (1 - xn) ** 1.1 + 0.2) * (0.55 + 0.9 * rng0.random(NH))
 flight = LOOK['Flight'] * (0.6 + 0.8 * rng0.random(NH))
@@ -283,22 +281,54 @@ def streak(img, p0, p1, w, taps=3):
         splat(img, q[:, 0], q[:, 1], w / taps)
 
 
-def glow_at(p, f):
+def glow_map(f):
+    """how bright a particle is at each place of the frame, this frame: the head as Screen 2 draws its figure - a soft
+    outline catching the light, wobbling as the haze flows round it, broken into travelling bright segments, rows
+    tearing sideways now and then, faint older outlines trailing behind; inside only a faint soft relief"""
+    t = f / FPS; th = TAU * f / N
+    hitE = burst_env(t)
+    sc = S / HS2
+    X2, Y2 = HGRID
+    u, v = X2 / HS2, Y2 / HS2
+    n1 = fbm(u * 3.2 + 0.45 * math.cos(th), v * 3.2 + 0.45 * math.sin(th)) - 0.5
+    n2 = fbm(u * 3.2 + 5.3 + 0.45 * math.cos(th + 2.1), v * 3.2 + 0.45 * math.sin(th + 2.1)) - 0.5
+    amp = LOOK['Flow'] * 18 * K / sc
+    dx = n1 * 2 * amp; dy = n2 * 2 * amp
+    rows = np.floor((np.arange(HS2) + 0.5) / HS2 * 240.0); tk = math.floor(t * 7.0 + 1e-6)
+    band = ss(0.8, 1.0, h21(rows, tk)) + 0.3 * ss(0.6, 1.0, h21(np.floor(rows / 8), tk + 7.0))
+    tear = ((h21(rows, tk + 3.1) - 0.5) * 0.06 * HS2 * band * LOOK['Tear'] * (1 + 2 * hitE)).astype(np.float32)
+    sx = X2 + dx + tear[:, None]; sy = Y2 + dy - DY[f] / sc
+    rem = lambda im, a, b: cv2.remap(im, a.astype(np.float32), b.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    md = rem(HEADH, sx, sy)
+    seg = ss(0.35, 0.75, fbm(u * 7.0 - 0.6 * math.cos(th), v * 7.0 + 0.6 * math.sin(th) + 9.0))
+    rim = np.clip(4 * md * (1 - md), 0, 1) * (0.3 + 0.95 * seg)
+    for ox, oy, w in ((16, -7, 0.45), (36, -16, 0.25)):                  # echoes trailing behind
+        me = rem(HEADH, sx - ox * K / sc + dx * 0.6, sy - oy * K / sc - dy * 0.6)
+        rim = np.maximum(rim, np.clip(4 * me * (1 - me), 0, 1) * w * LOOK['Echoes'] * (0.4 + 0.6 * seg))
+    rim *= rem(CUTH, sx, sy)
+    vol = rem(VOLH, sx, sy)
+    g = (LOOK['Streamglow'] * (1 - LOOK['Figure'] * vol) + LOOK['Headglow'] * vol + LOOK['Rim'] * rim
+         + LOOK['Detail'] * rem(RELH, sx, sy))
+    return cv2.resize(g, (S, S), interpolation=cv2.INTER_LINEAR)
+
+
+def glow_at(p, Gf):
     ix = np.clip(p[:, 0].astype(np.int64), 0, S - 1)
-    iy = np.clip((p[:, 1] - DY[f]).astype(np.int64), 0, S - 1)
-    return GLOW[iy, ix]
+    iy = np.clip(p[:, 1].astype(np.int64), 0, S - 1)
+    return Gf[iy, ix]
 
 
 def light_frame(f):
     rng = np.random.default_rng(7000 + f)
     E = np.zeros((S, S), np.float64)
+    Gf = glow_map(f)
     # the stream
     a = (f - SF0) % N
     al = np.nonzero(a < SLIFE)[0]
     a = a[al]
     p1 = SPOS[a, al].astype(np.float32)
     p0 = SPOS[np.maximum(a - 1, 0), al].astype(np.float32)
-    w = glow_at(p1, f) * np.minimum(1.0, (a + 1) / 4.0) * np.minimum(1.0, (SLIFE[al] - a) / 4.0)
+    w = glow_at(p1, Gf) * np.minimum(1.0, (a + 1) / 4.0) * np.minimum(1.0, (SLIFE[al] - a) / 4.0)
     w = w * (0.35 + 1.3 * rng.random(len(al)) ** 2)                    # twinkle: a few bright sparks
     streak(E, p0, p1, w.astype(np.float64))
     # the head's own particles
@@ -309,14 +339,14 @@ def light_frame(f):
     ri = al[rest]
     pr = P0[ri].copy(); pr[:, 1] += DY[f]
     pr += rng.normal(0, 0.5 * K / 1.5, pr.shape).astype(np.float32)
-    wr = 0.6 * HB[ri] * np.minimum(a[rest] / 6.0, 1.0) * (0.3 + 1.2 * rng.random(len(ri)) ** 2)
+    wr = 0.6 * glow_at(pr, Gf) * np.minimum(a[rest] / 6.0, 1.0) * (0.3 + 1.2 * rng.random(len(ri)) ** 2)
     splat(E, pr[:, 0], pr[:, 1], wr.astype(np.float64))
     fl = al[~rest]
     s_ = a[~rest] - HOLD_F[fl]
     q1 = HFL[s_, fl].astype(np.float32)
     q0 = HFL[np.maximum(s_ - 1, 0), fl].astype(np.float32)
     u = s_ / FL_F[fl]
-    wf = (HB[fl] * (1 - u) + glow_at(q1, f) * u) * (1 - u) ** 0.8 * (0.7 + 0.6 * rng.random(len(fl)))
+    wf = glow_at(q1, Gf) * (1 - u) ** 0.8 * (0.7 + 0.6 * rng.random(len(fl)))
     streak(E, q0, q1, wf.astype(np.float64))
     return E.astype(np.float32)
 

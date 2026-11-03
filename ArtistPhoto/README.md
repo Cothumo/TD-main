@@ -25,6 +25,11 @@ Every time-dependent term is periodic in the loop length, so the end runs straig
 
 ## Hologram in the stream (latest)
 
+**TouchDesigner version:** `TD_hologram/` (download: `artist_hologram_TD.zip`). Run its build script in your
+project to get `/project1/artist_hologram` live on the GPU. `TD_hologram/CHANGES.md` lists every change from the
+original Screen 2 silhouette.
+
+
 `artist_head_hologram_loop.mp4` (made by `render_hologram_loop.py`) is a 7 s, 1080 × 1080 seamless loop.
 
 - A particle stream constantly flows across the whole frame from the left side to the right side, with curl-noise
